@@ -8,11 +8,20 @@ import torch
 
 from bizztune.tune.utils import print_trainable_parameters
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 class Tuner:
-    def __init__(self, base_model: str):
+    def __init__(
+        self, 
+        base_model: str, 
+        quant_storage_dtype: str = 'torch.bfloat16', 
+        logger: logging.Logger=None
+    ):
         self.base_model = base_model
+        self.quant_storage_dtype = quant_storage_dtype
+
+        if logger is None:
+            logger = logging.getLogger(__name__)
+            logger.addHandler(logging.NullHandler())
+        self._logger = logger
     
     def get_tokenizer(self):
         # load tokenizer
@@ -22,7 +31,7 @@ class Tuner:
         tokenizer.padding_side = 'right'
         tokenizer.pad_token = tokenizer.eos_token # </s>
 
-        #logging.info(f"Model chat template: {tokenizer.default_chat_template}")
+        #self._logger.info(f"Model chat template: {tokenizer.default_chat_template}")
 
         return tokenizer
 
@@ -31,19 +40,20 @@ class Tuner:
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_quant_storage=torch.bfloat16, # must be same as data types used throughout the model because FSDP can only wrap layers and modules that have the same floating data type
+            bnb_4bit_quant_storage=self.quant_storage_dtype, # must be same as data types used throughout the model because FSDP can only wrap layers and modules that have the same floating data type
             bnb_4bit_use_double_quant=True
         )
+
         model_4bit = AutoModelForCausalLM.from_pretrained(
                 pretrained_model_name_or_path=self.model_name,
                 quantization_config=nf4_config,
-                #attn_implementation="flash_attention2", # not used for now bc of dependency conflict between lanfuse and packaging
-                torch_dtype=torch.bfloat16,
+                attn_implementation="sdpa", # flash_attention2 not used for now bc of dependency conflict between lanfuse and packaging
+                torch_dtype=self.quant_storage_dtype,
                 device_map="auto",
                 trust_remote_code=True,
         )
-        logging.info(f"Model: {model_4bit}")
-        logging.info(f"Device map: {model_4bit.hf_device_map}")
+        self._logger.info(f"Model: {model_4bit}")
+        self._logger.info(f"Device map: {model_4bit.hf_device_map}")
 
         model_4bit.config.use_cache = False # no caching of key/value pairs of attention mechanism
         model_4bit.config.pretraining_tp = 1 # tensor parallelism rank used during pretraining with Megatron
@@ -51,12 +61,12 @@ class Tuner:
 
         model_4bit = prepare_model_for_kbit_training(model_4bit) # prepare model (casting of layers to correct precision, etc.)
 
-        logging.info("Trainable parameters in model without LoRA:")
+        self._logger.info("Trainable parameters in model without LoRA:")
         print_trainable_parameters(model_4bit) # print trainable parameters
 
         return model_4bit
 
-    def _config_training(model: AutoModelForCausalLM) -> Tuple[AutoModelForCausalLM, LoraConfig]:
+    def _config_training(self, model: AutoModelForCausalLM) -> Tuple[AutoModelForCausalLM, LoraConfig]:
         peft_config = LoraConfig(
             lora_alpha=8,
             r=8, # usually alpha = r
@@ -68,7 +78,7 @@ class Tuner:
         )
         model = get_peft_model(model, peft_config)
 
-        logging.info("Trainable parameters in model with LoRA:")
+        self._logger.info("Trainable parameters in model with LoRA:")
         print_trainable_parameters(model) # print trainable parameters
 
         return model, peft_config
@@ -82,7 +92,7 @@ class Tuner:
             per_device_train_batch_size=4,
             gradient_accumulation_steps=1,
             save_steps=50,
-            logging_steps=1,
+            logger_steps=1,
             learning_rate=1e-4,
             lr_scheduler_type="cosine",
             weight_decay=1e-4,
@@ -102,22 +112,22 @@ class Tuner:
         push_to_hub: bool = False, 
         repo_id: str = None
     ):
-        logging.info("Get tokenizer")
+        self._logger.info("Get tokenizer")
         tokenizer = self.get_tokenizer()
 
-        logging.info("Get quantized model")
+        self._logger.info("Get quantized model")
         model_4bit = self._load_model_quantized()
 
-        logging.info("Setup chat format")
+        self._logger.info("Setup chat format")
         model_4bit, tokenizer = setup_chat_format(model_4bit, tokenizer)
 
-        logging.info("Configure LoRA and apply to model")
+        self._logger.info("Configure LoRA and apply to model")
         model_qlora, peft_config = self._config_training(model_4bit)
 
-        logging.info("Get training arguments")
+        self._logger.info("Get training arguments")
         training_arguments = self._get_training_arguments()
 
-        logging.info("Configure Trainer...")
+        self._logger.info("Configure Trainer...")
         trainer = SFTTrainer(
             model=model_qlora,
             train_dataset=train_set,
@@ -127,13 +137,19 @@ class Tuner:
             args=training_arguments,
         )
 
-        logging.info("Train model...")
-        trainer.train()
+        self._logger.info("Trainable parameters:")
+        trainer.model.print_trainable_parameters()
 
-        logging.info("Evaluate model...")
+        self._logger.info("Train model...")
+        checkpoint = None
+        if training_arguments.resume_from_checkpoint is not None:
+            checkpoint = training_arguments.resume_from_checkpoint
+        trainer.train(resume_from_checkpoint=checkpoint)
+
+        self._logger.info("Evaluate model...")
         trainer.evaluate()
 
-        logging.info("Save model and push to huggingface...")
+        self._logger.info("Save model and push to huggingface...")
         model_qlora.config.use_cache = True
         model_qlora.eval()
 
@@ -142,7 +158,7 @@ class Tuner:
                 raise ValueError("save_directory must be provided if save is True")
             if push_to_hub and repo_id is None:
                 raise ValueError("repo_id must be provided if push_to_hub is True")
-            logging.info("Saving model...")
+            self._logger.info("Saving model...")
             trainer.model.save_pretrained(
                 save_directory=save_directory,
                 push_to_hub=push_to_hub,

@@ -7,8 +7,6 @@ from bizztune.instructionset.instructionset import InstructionSet
 from bizztune.utils import load_dataset_from_disk, load_dataset_from_hf
 from bizztune.baseset.utils import create_instruction_dataset, create_prompt
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 load_dotenv()
 
 class BaseSet:
@@ -18,10 +16,16 @@ class BaseSet:
         input_path: str = None, 
         hf_dataset_name: str = None,
         hf_file_path: str = None,
-        dataset: Dataset = None
+        dataset: Dataset = None,
+        logger=None
     ):
+        if logger is None:
+            logger = logging.getLogger(__name__)
+            logger.addHandler(logging.NullHandler())
+        self._logger = logger
+
         if init_type == 'generate':
-            logging.info("Generating dataset...")
+            self._logger.info("Generating dataset...")
             self.dataset = self._generate_dataset(
                 category_dict=config["category_dict"],
                 dataset_prompt=config["prompt"],
@@ -30,19 +34,19 @@ class BaseSet:
                 seed=config["seed"]
             )
         elif init_type == 'from_disk':
-            logging.info("Loading dataset from disk...")
+            self._logger.info("Loading dataset from disk...")
             if input_path is None:
                 raise ValueError("Input path must be provided when initializing from disk")
             else:
                 self.dataset = load_dataset_from_disk(input_path=input_path)
         elif init_type == 'from_hf':
-            logging.info("Loading dataset from Hugging Face...")
+            self._logger.info("Loading dataset from Hugging Face...")
             if hf_dataset_name is None:
                 raise ValueError("HF dataset name must be provided when initializing from HF")
             else:
                 self.dataset = load_dataset_from_hf(hf_dataset_name, hf_file_path)
         elif init_type == 'from_Dataset':
-            logging.info("Loading dataset from Dataset object...")
+            self._logger.info("Loading dataset from Dataset object...")
             if dataset is not None:
                 raise ValueError("Dataset object must be provided when initializing from Dataset object")
             else:
@@ -65,7 +69,7 @@ class BaseSet:
 
         for category in category_dict.keys():
             for subcategory in category_dict[category].keys():
-                logging.info(f"Creating instruction dataset for {category} - {subcategory}")
+                self._logger.info(f"Creating instruction dataset for {category} - {subcategory}")
                 prompt = dataset_prompt.format(
                     category=category, 
                     subcategory=subcategory,
@@ -84,7 +88,7 @@ class BaseSet:
         return Dataset.from_list(samples)
 
     def get_instruction_set(self, instruction_template: str, category_dict: dict) -> InstructionSet:
-        logging.info("Generating instruction set from dataset...")
+        self._logger.info("Generating instruction set from dataset...")
 
         instructions = []
 
