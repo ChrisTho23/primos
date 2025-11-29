@@ -1,4 +1,4 @@
-# BizzTune
+# Primos
 This project aims to investigate whether task-specific fine-tuning can significantly enhance the performance of foundational large language models (LLMs) on complex, non-trivial natural language processing (NLP) tasks relevant to businesses. The approach involves using QLoRA, a parameter-efficient fine-tuning method, to fine-tune an open-source model on a synthetic task that mimics a real-world problem. The performance of the fine-tuned model will be compared with that of non-fine-tuned open- and closed-source state-of-the-art models.
 
 ## Overview
