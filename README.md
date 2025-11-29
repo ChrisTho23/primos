@@ -44,12 +44,12 @@ This project is still in progress. Below are the steps that have been completed 
 
 4. **Task-Specific Fine-Tuning**: Task-specific fine-tuning has been performed on an open-source LLM using the QLoRA framework. The model is first double-quantized (weights to 4-bit NF4, and first-level constants are also quantized), and then LoRA is set up on all attention and parts of the feed-forward layer (o_proj, gate_proj) with alpha = r = 8. Finally, LoRA is trained for 1 epoch with a cosine learning rate scheduler on the training set. The training is conducted on a cluster of two Nvidia L4 GPUs (24GB VRAM each, with approximately 5GB used for tuning). Currently, fine-tuning has been performed on Mistral 7B for testing purposes, with plans to run on Mistral 70B and LLama 3 70B. [Link to adapter](https://huggingface.co/ChrisTho/bizztune_mistral_7b_instruct)
 
-5. **Benchmarking Fine-Tuned Model**: The fine-tuned model will be benchmarked against the foundational model on the hold-out validation set. (Please fill in the results in the table below. It is expected that performance will improve significantly for larger models and once input masking is introduced.)
+5. **Benchmarking Fine-Tuned Model**: The fine-tuned model will be benchmarked against the foundational model on the hold-out validation set. 
 
     ### Fine-Tuned Model Comparison
     | Model            | Category Accuracy | Subcategory Accuracy | Urgency Accuracy |
     |------------------|-------------------|----------------------|------------------|
-    | **Mistral 7B**   |0.73 (+3%)                   |0.64 (-0.7%)                      |0.64 (+20%)                  |
+    | **Mistral 7B**   |0.88 (+10%)                   |0.94 (+13.3%)                      |0.92 (+43.8%)                  |
 
 The end-to-end fine-tuning and evaluation pipeline can be executed by running `bizztune/main.py`. Note that at least 12GB of VRAM should be available to perform these tasks.
 
